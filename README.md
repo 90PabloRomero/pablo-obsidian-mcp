@@ -1,58 +1,71 @@
 # pablo-obsidian-mcp
 
-MCP server for Obsidian vaults. Read, write, search, and analyze your notes from Claude Code (or any MCP client).
+An MCP server that gives Claude Code (or any MCP client) full read/write access to your Obsidian vault. Search notes, manage tasks, analyze the wiki-link graph, and organize attachments -- all from your terminal.
 
-Built with [Bun](https://bun.sh) and the [Model Context Protocol SDK](https://github.com/modelcontextprotocol/sdk).
+Built with [Bun](https://bun.sh), [Model Context Protocol SDK](https://github.com/modelcontextprotocol/sdk), and [Zod](https://zod.dev).
+
+## Why
+
+Obsidian stores everything as local markdown files, but AI coding assistants can't access them natively. This server bridges that gap: Claude can read your notes for context, create documentation as you work, search across hundreds of files instantly, and keep your vault organized -- without you ever leaving the terminal.
 
 ## Features
 
-- **22 tools** for full vault management
-- **Lazy discovery** - `discover_tools` + `get_tool_info` for efficient tool exploration
-- **Auto-compaction** - large result sets are automatically compacted with previews to save context
-- **Image insertion** - embed base64-encoded images (PNG, JPEG, WebP, GIF) directly into notes
-- **Note metadata** - `show_note` returns tags, links, tasks, frontmatter without reading full content
-- **Full-text search**, tag search, filename search
-- **Wiki-link graph** with backlinks, outgoing links, orphan detection
-- **Task management** - list, filter, and toggle checkboxes across the vault
-- **Attachment management** - list, organize, and clean up non-markdown files
+- **22 tools** across 7 categories (read, write, search, graph, tasks, attachments, meta)
+- **Lazy discovery** -- tools are exposed via `discover_tools` + `get_tool_info` so the LLM only loads what it needs
+- **Auto-compaction** -- large result sets (800+ notes) are automatically compacted with previews to save context window
+- **Wiki-link graph** -- backlinks, outgoing links, full graph analysis, orphan detection
+- **Task management** -- list and toggle checkboxes across the entire vault
+- **Image insertion** -- embed base64-encoded images (PNG, JPEG, WebP, GIF) directly into notes
+- **Metadata without content** -- `show_note` returns tags, links, tasks, frontmatter without reading the full file
 
-## Setup
+## Quick start
 
-### 1. Install dependencies
+### 1. Clone and install
 
 ```bash
+git clone https://github.com/90PabloRomero/pablo-obsidian-mcp.git
+cd pablo-obsidian-mcp
 bun install
 ```
 
-### 2. Configure in Claude Code
+### 2. Add to Claude Code
 
-Add to your `~/.claude/settings.json` (or project `.claude/settings.json`):
+Add to `~/.claude/settings.json` (or project `.claude/settings.json`):
 
 ```json
 {
   "mcpServers": {
     "obsidian": {
       "command": "bun",
-      "args": ["run", "/path/to/pablo-obsidian-mcp/src/index.ts"],
+      "args": ["run", "/absolute/path/to/pablo-obsidian-mcp/src/index.ts"],
       "env": {
-        "OBSIDIAN_VAULT_PATH": "/path/to/your/vault"
+        "OBSIDIAN_VAULT_PATH": "/absolute/path/to/your/vault"
       }
     }
   }
 }
 ```
 
-### 3. Environment variables
+### 3. Use it
+
+Once configured, Claude Code automatically discovers the tools. Ask it things like:
+
+- *"Search my vault for notes about authentication"*
+- *"Create a new note summarizing today's work"*
+- *"Show me all incomplete tasks across my vault"*
+- *"Which notes link to my architecture decisions note?"*
+
+## Configuration
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `OBSIDIAN_VAULT_PATH` | Yes | - | Absolute path to your Obsidian vault |
+| `OBSIDIAN_VAULT_PATH` | Yes | -- | Absolute path to your Obsidian vault |
 | `OBSIDIAN_COMPACTION_THRESHOLD` | No | `20` | Results above this count get compacted |
 | `OBSIDIAN_PREVIEW_COUNT` | No | `5` | Number of items shown in compacted previews |
 
 ## Tools
 
-### Meta (lazy discovery)
+### Meta
 
 | Tool | Description |
 |------|-------------|
@@ -109,9 +122,9 @@ Add to your `~/.claude/settings.json` (or project `.claude/settings.json`):
 | `organize_attachments` | Move attachments to a folder and update references |
 | `insert_image` | Save a base64 image and embed it in a note |
 
-## Compaction
+## How compaction works
 
-When a result set exceeds the threshold (default 20), the server returns a compacted response:
+When a result set exceeds the threshold (default 20), the server returns a compacted response instead of dumping everything into the context window:
 
 ```json
 {
@@ -123,7 +136,25 @@ When a result set exceeds the threshold (default 20), the server returns a compa
 }
 ```
 
-This prevents large vaults from burning through the LLM context window.
+This keeps token usage low even on vaults with thousands of notes. The LLM can then drill down into specific notes or narrow its search.
+
+## Architecture
+
+```
+src/
+  index.ts          -- MCP server entry point and tool registration
+  vault.ts          -- Vault filesystem operations and path resolution
+  parser.ts         -- Markdown parsing (frontmatter, wiki-links, tags, tasks)
+  compact.ts        -- Auto-compaction logic for large result sets
+  tools/
+    meta.ts         -- discover_tools, get_tool_info
+    read.ts         -- list_notes, read_note, show_note, get_vault_stats
+    write.ts        -- create_note, edit_note, delete_note, delete_folder, append_to_note
+    search.ts       -- search_notes, search_by_tag, find_notes_by_name
+    graph.ts        -- get_backlinks, get_outgoing_links, get_graph
+    tasks.ts        -- list_tasks, toggle_task
+    attachments.ts  -- list_attachments, organize_attachments, insert_image
+```
 
 ## License
 
