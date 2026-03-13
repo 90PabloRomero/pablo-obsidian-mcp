@@ -1,56 +1,98 @@
 import { z } from "zod/v4";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { VaultManager } from "../vault.ts";
-import { extractTags } from "../parser.ts";
+import { obsidian, obsidianJson } from "../cli.ts";
 import { compactResults } from "../compact.ts";
 
-interface SearchMatch {
-  note: string;
-  path: string;
-  matches: { line: number; text: string }[];
-}
-
-export function registerSearchTools(
-  server: McpServer,
-  vault: VaultManager,
-): void {
+export function registerSearchTools(server: McpServer): void {
   server.registerTool(
     "search_notes",
     {
       description:
-        "Search for text across all notes in the vault. Returns matching lines with context.",
+        "Search for text across all notes in the vault. Returns matching file paths.",
       inputSchema: z.object({
-        query: z.string().describe("Text to search for (case-insensitive)"),
+        query: z.string().describe("Text to search for (supports property syntax like status::open)"),
         path: z
           .string()
           .optional()
           .describe("Subfolder to limit the search"),
+        limit: z
+          .number()
+          .optional()
+          .describe("Max number of results"),
+        case_sensitive: z
+          .boolean()
+          .optional()
+          .describe("Case sensitive search"),
       }),
     },
-    async ({ query, path }) => {
-      const notes = await vault.listFiles(path);
-      const results: SearchMatch[] = [];
-      const queryLower = query.toLowerCase();
+    async ({ query, path, limit, case_sensitive }) => {
+      const raw = await obsidian("search", {
+        query,
+        path,
+        limit,
+        case: case_sensitive || undefined,
+        format: "json",
+      } as Record<string, string | number | boolean | undefined>);
 
-      for (const note of notes) {
-        const content = await vault.readFile(note.path);
-        const lines = content.split("\n");
-        const matches: { line: number; text: string }[] = [];
+      const results = safeJsonParse(raw, []);
 
-        for (let i = 0; i < lines.length; i++) {
-          if (lines[i]!.toLowerCase().includes(queryLower)) {
-            matches.push({ line: i + 1, text: lines[i]! });
-          }
-        }
-
-        if (matches.length > 0) {
-          results.push({
-            note: note.name,
-            path: note.path,
-            matches,
-          });
-        }
+      if (results.length === 0) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `No matches found for "${query}"`,
+            },
+          ],
+        };
       }
+
+      const compacted = compactResults(results, {
+        entityName: "matching notes",
+        detailTool: "read_note",
+      });
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify(compacted, null, 2),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    "search_context",
+    {
+      description: "Search with matching line context (grep-style path:line:text output)",
+      inputSchema: z.object({
+        query: z.string().describe("Text to search for"),
+        path: z
+          .string()
+          .optional()
+          .describe("Subfolder to limit the search"),
+        limit: z
+          .number()
+          .optional()
+          .describe("Max number of files"),
+        case_sensitive: z
+          .boolean()
+          .optional()
+          .describe("Case sensitive search"),
+      }),
+    },
+    async ({ query, path, limit, case_sensitive }) => {
+      const raw = await obsidian("search:context", {
+        query,
+        path,
+        limit,
+        case: case_sensitive || undefined,
+        format: "json",
+      } as Record<string, string | number | boolean | undefined>);
+
+      const results = safeJsonParse(raw, []);
 
       if (results.length === 0) {
         return {
@@ -82,7 +124,7 @@ export function registerSearchTools(
   server.registerTool(
     "search_by_tag",
     {
-      description: "Find all notes containing a specific hashtag",
+      description: "Find all notes containing a specific tag",
       inputSchema: z.object({
         tag: z
           .string()
@@ -90,38 +132,28 @@ export function registerSearchTools(
       }),
     },
     async ({ tag }) => {
-      const notes = await vault.listFiles();
-      const tagClean = tag.startsWith("#") ? tag.slice(1) : tag;
-      const results: { note: string; path: string }[] = [];
+      const tagClean = tag.startsWith("#") ? tag : `#${tag}`;
+      const raw = await obsidian("tag", {
+        name: tagClean,
+        verbose: true,
+      });
 
-      for (const note of notes) {
-        const content = await vault.readFile(note.path);
-        const tags = extractTags(content);
-        if (tags.includes(tagClean)) {
-          results.push({ note: note.name, path: note.path });
-        }
-      }
-
-      if (results.length === 0) {
+      if (!raw || raw.includes("not found")) {
         return {
           content: [
             {
               type: "text" as const,
-              text: `No notes found with tag #${tagClean}`,
+              text: `No notes found with tag ${tagClean}`,
             },
           ],
         };
       }
 
-      const compacted = compactResults(results, {
-        entityName: "tagged notes",
-      });
-
       return {
         content: [
           {
             type: "text" as const,
-            text: JSON.stringify(compacted, null, 2),
+            text: raw,
           },
         ],
       };
@@ -140,11 +172,12 @@ export function registerSearchTools(
       }),
     },
     async ({ pattern }) => {
-      const notes = await vault.listFiles();
-      const patternLower = pattern.toLowerCase();
-      const results = notes
-        .filter((n) => n.name.toLowerCase().includes(patternLower))
-        .map((n) => ({ name: n.name, path: n.path }));
+      const raw = await obsidian("search", {
+        query: pattern,
+        format: "json",
+      } as Record<string, string | number | boolean | undefined>);
+
+      const results = safeJsonParse(raw, []);
 
       if (results.length === 0) {
         return {
@@ -171,4 +204,12 @@ export function registerSearchTools(
       };
     },
   );
+}
+
+function safeJsonParse<T>(str: string, fallback: T): T {
+  try {
+    return JSON.parse(str) as T;
+  } catch {
+    return fallback;
+  }
 }

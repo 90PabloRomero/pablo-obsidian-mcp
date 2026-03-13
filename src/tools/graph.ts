@@ -1,61 +1,37 @@
 import { z } from "zod/v4";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { VaultManager } from "../vault.ts";
-import { extractWikiLinks } from "../parser.ts";
+import { obsidian } from "../cli.ts";
 
-interface GraphNode {
-  name: string;
-  path: string;
-}
-
-interface GraphEdge {
-  from: string;
-  to: string;
-}
-
-export function registerGraphTools(
-  server: McpServer,
-  vault: VaultManager,
-): void {
+export function registerGraphTools(server: McpServer): void {
   server.registerTool(
     "get_backlinks",
     {
       description:
         "Find all notes that link to a given note via [[wiki-links]]",
       inputSchema: z.object({
-        noteName: z
+        path: z
           .string()
-          .describe("Name of the note to find backlinks for (without .md)"),
+          .optional()
+          .describe("Path to the note (defaults to active file)"),
+        file: z
+          .string()
+          .optional()
+          .describe("File name to find backlinks for (resolved like wikilinks)"),
       }),
     },
-    async ({ noteName }) => {
-      const notes = await vault.listFiles();
-      const backlinks: { note: string; path: string }[] = [];
-
-      for (const note of notes) {
-        const content = await vault.readFile(note.path);
-        const links = extractWikiLinks(content);
-        if (links.some((l) => l.toLowerCase() === noteName.toLowerCase())) {
-          backlinks.push({ note: note.name, path: note.path });
-        }
-      }
-
-      if (backlinks.length === 0) {
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: `No backlinks found for "${noteName}"`,
-            },
-          ],
-        };
-      }
+    async ({ path, file }) => {
+      const raw = await obsidian("backlinks", {
+        path,
+        file,
+        counts: true,
+        format: "json",
+      } as Record<string, string | boolean | undefined>);
 
       return {
         content: [
           {
             type: "text" as const,
-            text: JSON.stringify(backlinks, null, 2),
+            text: raw || "No backlinks found",
           },
         ],
       };
@@ -65,20 +41,25 @@ export function registerGraphTools(
   server.registerTool(
     "get_outgoing_links",
     {
-      description: "Get all wiki-links found in a specific note",
+      description: "Get all outgoing links from a specific note",
       inputSchema: z.object({
-        path: z.string().describe("Path to the note"),
+        path: z
+          .string()
+          .optional()
+          .describe("Path to the note"),
+        file: z
+          .string()
+          .optional()
+          .describe("File name (resolved like wikilinks)"),
       }),
     },
-    async ({ path }) => {
-      const content = await vault.readFile(path);
-      const links = extractWikiLinks(content);
-
+    async ({ path, file }) => {
+      const raw = await obsidian("links", { path, file });
       return {
         content: [
           {
             type: "text" as const,
-            text: JSON.stringify(links, null, 2),
+            text: raw || "No outgoing links found",
           },
         ],
       };
@@ -89,49 +70,20 @@ export function registerGraphTools(
     "get_graph",
     {
       description:
-        "Get the complete link graph of the vault (all nodes and edges)",
+        "Get graph analysis: orphans (no incoming links) and deadends (no outgoing links)",
       inputSchema: z.object({}),
     },
     async () => {
-      const notes = await vault.listFiles();
-      const nodes: GraphNode[] = [];
-      const edges: GraphEdge[] = [];
-      const noteNames = new Set(notes.map((n) => n.name.toLowerCase()));
-
-      for (const note of notes) {
-        nodes.push({ name: note.name, path: note.path });
-        const content = await vault.readFile(note.path);
-        const links = extractWikiLinks(content);
-
-        for (const link of links) {
-          edges.push({ from: note.name, to: link });
-        }
-      }
-
-      const orphans = nodes.filter((n) => {
-        const hasOutgoing = edges.some(
-          (e) => e.from.toLowerCase() === n.name.toLowerCase(),
-        );
-        const hasIncoming = edges.some(
-          (e) => e.to.toLowerCase() === n.name.toLowerCase(),
-        );
-        return !hasOutgoing && !hasIncoming;
-      });
-
-      const unresolvedLinks = [
-        ...new Set(
-          edges
-            .filter((e) => !noteNames.has(e.to.toLowerCase()))
-            .map((e) => e.to),
-        ),
-      ];
+      const [orphans, deadends, unresolved] = await Promise.all([
+        obsidian("orphans"),
+        obsidian("deadends"),
+        obsidian("unresolved", { verbose: true, format: "json" } as Record<string, string | boolean>).catch(() => "[]"),
+      ]);
 
       const graph = {
-        nodes: nodes.length,
-        edges: edges.length,
-        orphans: orphans.map((n) => n.name),
-        unresolvedLinks,
-        connections: edges,
+        orphans: orphans.split("\n").filter(Boolean),
+        deadends: deadends.split("\n").filter(Boolean),
+        unresolved: safeJsonParse(unresolved, []),
       };
 
       return {
@@ -144,4 +96,12 @@ export function registerGraphTools(
       };
     },
   );
+}
+
+function safeJsonParse<T>(str: string, fallback: T): T {
+  try {
+    return JSON.parse(str) as T;
+  } catch {
+    return fallback;
+  }
 }

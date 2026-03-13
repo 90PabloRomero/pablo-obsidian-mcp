@@ -1,18 +1,9 @@
 import { z } from "zod/v4";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { VaultManager } from "../vault.ts";
-import {
-  extractTags,
-  extractWikiLinks,
-  extractTasks,
-  extractFrontmatter,
-} from "../parser.ts";
+import { obsidian, obsidianJson } from "../cli.ts";
 import { compactResults } from "../compact.ts";
 
-export function registerReadTools(
-  server: McpServer,
-  vault: VaultManager,
-): void {
+export function registerReadTools(server: McpServer): void {
   server.registerTool(
     "list_notes",
     {
@@ -25,9 +16,20 @@ export function registerReadTools(
       }),
     },
     async ({ path }) => {
-      const notes = await vault.listFiles(path);
-      const slim = notes.map((n) => ({ name: n.name, path: n.path }));
-      const result = compactResults(slim, {
+      const raw = await obsidian("files", {
+        folder: path,
+        ext: "md",
+      });
+
+      const notes = raw
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => {
+          const name = line.replace(/\.md$/, "").split("/").pop()!;
+          return { name, path: line };
+        });
+
+      const result = compactResults(notes, {
         entityName: "notes",
         detailTool: "read_note",
       });
@@ -56,7 +58,7 @@ export function registerReadTools(
       }),
     },
     async ({ path }) => {
-      const content = await vault.readFile(path);
+      const content = await obsidian("read", { path });
       return {
         content: [{ type: "text" as const, text: content }],
       };
@@ -67,7 +69,7 @@ export function registerReadTools(
     "show_note",
     {
       description:
-        "Get note metadata (size, tags, links, tasks) without reading full content",
+        "Get note metadata (size, tags, links, tasks, properties) without reading full content",
       inputSchema: z.object({
         path: z
           .string()
@@ -75,33 +77,30 @@ export function registerReadTools(
       }),
     },
     async ({ path }) => {
-      const [info, content] = await Promise.all([
-        vault.getFileInfo(path),
-        vault.readFile(path),
-      ]);
-
-      const tags = extractTags(content);
-      const links = extractWikiLinks(content);
-      const tasks = extractTasks(content);
-      const frontmatter = extractFrontmatter(content);
-      const wordCount = content
-        .split(/\s+/)
-        .filter((w) => w.length > 0).length;
+      const [fileInfo, tags, properties, outline, backlinksRaw, linksRaw, tasksTodo, tasksDone] =
+        await Promise.all([
+          obsidian("file", { path }),
+          obsidian("tags", { path, format: "json" } as Record<string, string>).catch(() => "[]"),
+          obsidian("properties", { path, format: "json" } as Record<string, string>).catch(() => "{}"),
+          obsidian("outline", { path, format: "json" } as Record<string, string>).catch(() => "[]"),
+          obsidian("backlinks", { path, total: true }).catch(() => "0"),
+          obsidian("links", { path, total: true }).catch(() => "0"),
+          obsidian("tasks", { path, todo: true, total: true }).catch(() => "0"),
+          obsidian("tasks", { path, done: true, total: true }).catch(() => "0"),
+        ]);
 
       const metadata = {
-        name: info.name,
-        path: info.path,
-        size: info.size,
-        modified: info.modified,
-        wordCount,
-        tags,
-        links,
+        fileInfo,
+        tags: safeJsonParse(tags, []),
+        properties: safeJsonParse(properties, {}),
+        outline: safeJsonParse(outline, []),
+        backlinks: parseInt(backlinksRaw) || 0,
+        outgoingLinks: parseInt(linksRaw) || 0,
         tasks: {
-          total: tasks.length,
-          open: tasks.filter((t) => !t.done).length,
-          done: tasks.filter((t) => t.done).length,
+          open: parseInt(tasksTodo) || 0,
+          done: parseInt(tasksDone) || 0,
+          total: (parseInt(tasksTodo) || 0) + (parseInt(tasksDone) || 0),
         },
-        frontmatter,
       };
 
       return {
@@ -123,33 +122,31 @@ export function registerReadTools(
       inputSchema: z.object({}),
     },
     async () => {
-      const notes = await vault.listFiles();
-      const allTags = new Set<string>();
-      let linkCount = 0;
-      let totalTasks = 0;
-      let doneTasks = 0;
+      const [vaultInfo, fileCount, tagData, tasksTodo, tasksDone, unresolvedCount, orphanCount] =
+        await Promise.all([
+          obsidian("vault"),
+          obsidian("files", { total: true }),
+          obsidian("tags", { counts: true }, { format: "json" }).catch(() => "[]"),
+          obsidian("tasks", { todo: true, total: true }).catch(() => "0"),
+          obsidian("tasks", { done: true, total: true }).catch(() => "0"),
+          obsidian("unresolved", { total: true }).catch(() => "0"),
+          obsidian("orphans", { total: true }).catch(() => "0"),
+        ]);
 
-      for (const note of notes) {
-        const content = await vault.readFile(note.path);
-        for (const tag of extractTags(content)) {
-          allTags.add(tag);
-        }
-        linkCount += extractWikiLinks(content).length;
-        const tasks = extractTasks(content);
-        totalTasks += tasks.length;
-        doneTasks += tasks.filter((t) => t.done).length;
-      }
+      const tags = safeJsonParse<{ tag: string; count: string }[]>(tagData, []);
 
       const stats = {
-        noteCount: notes.length,
-        tagCount: allTags.size,
-        tags: [...allTags].sort(),
-        linkCount,
+        vault: vaultInfo,
+        noteCount: parseInt(fileCount) || 0,
+        tagCount: tags.length,
+        tags: tags.map((t) => ({ tag: t.tag, count: parseInt(t.count) || 0 })),
         taskStats: {
-          total: totalTasks,
-          done: doneTasks,
-          open: totalTasks - doneTasks,
+          open: parseInt(tasksTodo) || 0,
+          done: parseInt(tasksDone) || 0,
+          total: (parseInt(tasksTodo) || 0) + (parseInt(tasksDone) || 0),
         },
+        unresolvedLinks: parseInt(unresolvedCount) || 0,
+        orphanNotes: parseInt(orphanCount) || 0,
       };
 
       return {
@@ -162,4 +159,12 @@ export function registerReadTools(
       };
     },
   );
+}
+
+function safeJsonParse<T>(str: string, fallback: T): T {
+  try {
+    return JSON.parse(str) as T;
+  } catch {
+    return fallback;
+  }
 }

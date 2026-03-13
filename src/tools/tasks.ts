@@ -1,21 +1,9 @@
 import { z } from "zod/v4";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { VaultManager } from "../vault.ts";
-import { extractTasks } from "../parser.ts";
+import { obsidian } from "../cli.ts";
 import { compactResults } from "../compact.ts";
 
-interface TaskResult {
-  note: string;
-  path: string;
-  line: number;
-  text: string;
-  done: boolean;
-}
-
-export function registerTaskTools(
-  server: McpServer,
-  vault: VaultManager,
-): void {
+export function registerTaskTools(server: McpServer): void {
   server.registerTool(
     "list_tasks",
     {
@@ -25,37 +13,33 @@ export function registerTaskTools(
         path: z
           .string()
           .optional()
-          .describe("Subfolder to limit the search"),
+          .describe("Filter by file path"),
+        file: z
+          .string()
+          .optional()
+          .describe("Filter by file name"),
         status: z
           .enum(["all", "open", "done"])
           .optional()
           .describe("Filter by task status (default: all)"),
       }),
     },
-    async ({ path, status }) => {
-      const notes = await vault.listFiles(path);
-      const results: TaskResult[] = [];
-      const filter = status ?? "all";
+    async ({ path, file, status }) => {
+      const params: Record<string, string | boolean | undefined> = {
+        path,
+        file,
+        verbose: true,
+        format: "json",
+      };
 
-      for (const note of notes) {
-        const content = await vault.readFile(note.path);
-        const tasks = extractTasks(content);
+      if (status === "open") params.todo = true;
+      if (status === "done") params.done = true;
 
-        for (const task of tasks) {
-          if (filter === "open" && task.done) continue;
-          if (filter === "done" && !task.done) continue;
-
-          results.push({
-            note: note.name,
-            path: note.path,
-            line: task.line,
-            text: task.text,
-            done: task.done,
-          });
-        }
-      }
+      const raw = await obsidian("tasks", params);
+      const results = safeJsonParse(raw, []);
 
       if (results.length === 0) {
+        const filter = status ?? "all";
         return {
           content: [
             {
@@ -92,41 +76,29 @@ export function registerTaskTools(
         "Toggle a task checkbox between done and not done",
       inputSchema: z.object({
         path: z.string().describe("Path to the note containing the task"),
-        lineNumber: z
+        line: z
           .number()
           .describe("Line number of the task to toggle (1-based)"),
       }),
     },
-    async ({ path, lineNumber }) => {
-      const line = await vault.readLine(path, lineNumber);
-
-      const match = line.match(/^([\s]*- \[)([ xX])(\]\s+.+)/);
-      if (!match) {
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: `Line ${lineNumber} is not a task checkbox`,
-            },
-          ],
-          isError: true,
-        };
-      }
-
-      const wasDone = match[2] !== " ";
-      const newCheckmark = wasDone ? " " : "x";
-      const newLine = `${match[1]}${newCheckmark}${match[3]}`;
-
-      await vault.replaceLine(path, lineNumber, newLine);
-
+    async ({ path, line }) => {
+      await obsidian("task", { path, line, toggle: true });
       return {
         content: [
           {
             type: "text" as const,
-            text: `Task on line ${lineNumber} toggled to ${wasDone ? "open" : "done"}`,
+            text: `Task on line ${line} toggled`,
           },
         ],
       };
     },
   );
+}
+
+function safeJsonParse<T>(str: string, fallback: T): T {
+  try {
+    return JSON.parse(str) as T;
+  } catch {
+    return fallback;
+  }
 }

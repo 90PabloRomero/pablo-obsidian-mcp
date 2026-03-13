@@ -1,6 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { VaultManager } from "./vault.ts";
 import { registerMetaTools } from "./tools/meta.ts";
 import { registerReadTools } from "./tools/read.ts";
 import { registerWriteTools } from "./tools/write.ts";
@@ -10,46 +9,37 @@ import { registerTaskTools } from "./tools/tasks.ts";
 import { registerAttachmentTools } from "./tools/attachments.ts";
 import { registerResources } from "./resources.ts";
 
-const vaultPath = process.env.OBSIDIAN_VAULT_PATH;
-
-if (!vaultPath) {
-  console.error(
-    "OBSIDIAN_VAULT_PATH environment variable is required",
-  );
-  process.exit(1);
-}
-
-const vault = new VaultManager(vaultPath);
-
 const server = new McpServer(
   {
     name: "obsidian",
-    version: "1.1.0",
+    version: "2.0.0",
   },
   {
     instructions: [
-      "Obsidian vault MCP server with 22 tools for reading, writing, searching, and analyzing markdown notes.",
+      "Obsidian vault MCP server powered by Obsidian CLI.",
       "",
       "Check the resource obsidian://quickstart to learn how to use this server efficiently.",
       "",
       "Efficiency guidelines:",
       "- list_notes returns only names and paths. Use read_note for content, show_note for metadata.",
-      "- show_note is cheaper than read_note when you only need tags, links, word count, or frontmatter.",
-      "- Large result sets are automatically compacted with a preview. Narrow with path/query filters for full results.",
-      "- insert_image accepts base64 data to save images as attachments and embed them in notes.",
+      "- show_note returns properties, tags, outline, backlinks, tasks without reading full content.",
+      "- search_notes supports property syntax (e.g. query='status::open') for frontmatter queries.",
+      "- set_property/get_property/remove_property manage frontmatter with native typing.",
+      "- move_note and rename_note automatically update internal wiki-links.",
+      "- Large result sets are automatically compacted with a preview. Narrow with path/query filters.",
     ].join("\n"),
   },
 );
 
 registerMetaTools(server);
-registerReadTools(server, vault);
-registerWriteTools(server, vault);
-registerSearchTools(server, vault);
-registerGraphTools(server, vault);
-registerTaskTools(server, vault);
-registerAttachmentTools(server, vault);
+registerReadTools(server);
+registerWriteTools(server);
+registerSearchTools(server);
+registerGraphTools(server);
+registerTaskTools(server);
+registerAttachmentTools(server);
 registerResources(server);
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
-console.error("Obsidian MCP server running on stdio");
+console.error("Obsidian MCP server v2.0.0 running on stdio (CLI backend)");

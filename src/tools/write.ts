@@ -1,11 +1,8 @@
 import { z } from "zod/v4";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { VaultManager } from "../vault.ts";
+import { obsidian } from "../cli.ts";
 
-export function registerWriteTools(
-  server: McpServer,
-  vault: VaultManager,
-): void {
+export function registerWriteTools(server: McpServer): void {
   server.registerTool(
     "create_note",
     {
@@ -14,28 +11,23 @@ export function registerWriteTools(
         path: z
           .string()
           .describe("Path for the new note (e.g. 'folder/note.md')"),
-        content: z.string().describe("Markdown content for the note"),
+        content: z.string().optional().describe("Markdown content for the note"),
+        template: z.string().optional().describe("Template name to use"),
         overwrite: z
           .boolean()
           .optional()
           .describe("Overwrite if the note already exists (default: false)"),
       }),
     },
-    async ({ path, content, overwrite }) => {
-      const exists = await vault.exists(path);
-      if (exists && !overwrite) {
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: `Note already exists at ${path}. Set overwrite=true to replace it.`,
-            },
-          ],
-          isError: true,
-        };
-      }
+    async ({ path, content, template, overwrite }) => {
+      const params: Record<string, string | boolean | undefined> = {
+        path,
+        content,
+        template,
+        overwrite: overwrite || undefined,
+      };
 
-      await vault.writeFile(path, content);
+      await obsidian("create", params);
       return {
         content: [
           {
@@ -57,20 +49,7 @@ export function registerWriteTools(
       }),
     },
     async ({ path, content }) => {
-      const exists = await vault.exists(path);
-      if (!exists) {
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: `Note not found: ${path}`,
-            },
-          ],
-          isError: true,
-        };
-      }
-
-      await vault.writeFile(path, content);
+      await obsidian("create", { path, content, overwrite: true });
       return {
         content: [
           {
@@ -85,26 +64,17 @@ export function registerWriteTools(
   server.registerTool(
     "delete_note",
     {
-      description: "Delete a note from the vault",
+      description: "Delete a note from the vault (moves to trash by default)",
       inputSchema: z.object({
         path: z.string().describe("Path to the note to delete"),
+        permanent: z
+          .boolean()
+          .optional()
+          .describe("Skip trash and delete permanently"),
       }),
     },
-    async ({ path }) => {
-      const exists = await vault.exists(path);
-      if (!exists) {
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: `Note not found: ${path}`,
-            },
-          ],
-          isError: true,
-        };
-      }
-
-      await vault.deleteFile(path);
+    async ({ path, permanent }) => {
+      await obsidian("delete", { path, permanent: permanent || undefined });
       return {
         content: [
           {
@@ -125,28 +95,19 @@ export function registerWriteTools(
         path: z
           .string()
           .describe("Path to the folder to delete (relative to vault root)"),
+        permanent: z
+          .boolean()
+          .optional()
+          .describe("Skip trash and delete permanently"),
       }),
     },
-    async ({ path }) => {
-      const exists = await vault.exists(path);
-      if (!exists) {
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: `Folder not found: ${path}`,
-            },
-          ],
-          isError: true,
-        };
-      }
-
-      const { deleted } = await vault.deleteDir(path);
+    async ({ path, permanent }) => {
+      await obsidian("delete", { path, permanent: permanent || undefined });
       return {
         content: [
           {
             type: "text" as const,
-            text: `Folder deleted: ${path} (${deleted} note${deleted !== 1 ? "s" : ""} removed)`,
+            text: `Folder deleted: ${path}`,
           },
         ],
       };
@@ -161,32 +122,155 @@ export function registerWriteTools(
         path: z.string().describe("Path to the note"),
         content: z
           .string()
-          .describe("Content to append (will be added after a newline)"),
+          .describe("Content to append"),
       }),
     },
-    async ({ path, content }) => {
-      const exists = await vault.exists(path);
-      if (!exists) {
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: `Note not found: ${path}`,
-            },
-          ],
-          isError: true,
-        };
-      }
-
-      const existing = await vault.readFile(path);
-      const separator = existing.endsWith("\n") ? "" : "\n";
-      await vault.writeFile(path, existing + separator + content);
-
+    async ({ path, content: text }) => {
+      await obsidian("append", { path, content: text });
       return {
         content: [
           {
             type: "text" as const,
             text: `Content appended to ${path}`,
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    "prepend_to_note",
+    {
+      description: "Prepend content after frontmatter of an existing note",
+      inputSchema: z.object({
+        path: z.string().describe("Path to the note"),
+        content: z
+          .string()
+          .describe("Content to prepend"),
+      }),
+    },
+    async ({ path, content: text }) => {
+      await obsidian("prepend", { path, content: text });
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Content prepended to ${path}`,
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    "move_note",
+    {
+      description: "Move or rename a note (automatically updates internal links)",
+      inputSchema: z.object({
+        path: z.string().describe("Current path of the note"),
+        to: z.string().describe("Destination path"),
+      }),
+    },
+    async ({ path, to }) => {
+      await obsidian("move", { path, to });
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Note moved from ${path} to ${to} (links updated)`,
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    "rename_note",
+    {
+      description: "Rename a note (automatically updates internal links)",
+      inputSchema: z.object({
+        path: z.string().describe("Path to the note"),
+        name: z.string().describe("New name for the note"),
+      }),
+    },
+    async ({ path, name }) => {
+      await obsidian("rename", { path, name });
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Note renamed to ${name} (links updated)`,
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    "set_property",
+    {
+      description: "Set a frontmatter property on a note with native typing",
+      inputSchema: z.object({
+        path: z.string().describe("Path to the note"),
+        name: z.string().describe("Property name"),
+        value: z.string().describe("Property value"),
+        type: z
+          .enum(["text", "list", "number", "checkbox", "date", "datetime"])
+          .optional()
+          .describe("Property type (default: text)"),
+      }),
+    },
+    async ({ path, name, value, type }) => {
+      await obsidian("property:set", { name, value, type, path });
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Property "${name}" set to "${value}" on ${path}`,
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    "get_property",
+    {
+      description: "Read a frontmatter property value from a note",
+      inputSchema: z.object({
+        path: z.string().describe("Path to the note"),
+        name: z.string().describe("Property name to read"),
+      }),
+    },
+    async ({ path, name }) => {
+      const value = await obsidian("property:read", { name, path });
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: value || `Property "${name}" not found on ${path}`,
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    "remove_property",
+    {
+      description: "Remove a frontmatter property from a note",
+      inputSchema: z.object({
+        path: z.string().describe("Path to the note"),
+        name: z.string().describe("Property name to remove"),
+      }),
+    },
+    async ({ path, name }) => {
+      await obsidian("property:remove", { name, path });
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Property "${name}" removed from ${path}`,
           },
         ],
       };
