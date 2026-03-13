@@ -8,6 +8,7 @@ import { registerSearchTools } from "./tools/search.ts";
 import { registerGraphTools } from "./tools/graph.ts";
 import { registerTaskTools } from "./tools/tasks.ts";
 import { registerAttachmentTools } from "./tools/attachments.ts";
+import { registerResources } from "./resources.ts";
 
 const vaultPath = process.env.OBSIDIAN_VAULT_PATH;
 
@@ -29,8 +30,9 @@ const server = new McpServer(
     instructions: [
       "Obsidian vault MCP server with 22 tools for reading, writing, searching, and analyzing markdown notes.",
       "",
+      "Check the resource obsidian://quickstart to learn how to use this server efficiently.",
+      "",
       "Efficiency guidelines:",
-      "- Call discover_tools() first to see all available tools.",
       "- list_notes returns only names and paths. Use read_note for content, show_note for metadata.",
       "- show_note is cheaper than read_note when you only need tags, links, word count, or frontmatter.",
       "- Large result sets are automatically compacted with a preview. Narrow with path/query filters for full results.",
@@ -46,6 +48,7 @@ registerSearchTools(server, vault);
 registerGraphTools(server, vault);
 registerTaskTools(server, vault);
 registerAttachmentTools(server, vault);
+registerResources(server);
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
