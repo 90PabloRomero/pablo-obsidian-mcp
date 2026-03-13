@@ -1,0 +1,19 @@
+{
+  "name": "obsidian",
+  "description": "MCP server for Obsidian vaults - read, write, search, and analyze your notes from Claude Code.",
+  "version": "1.2.0",
+  "author": {
+    "name": "Pablo Romero",
+    "url": "https://github.com/90PabloRomero"
+  },
+  "repository": "https://github.com/90PabloRomero/pablo-obsidian-mcp",
+  "license": "MIT",
+  "homepage": "https://github.com/90PabloRomero/pablo-obsidian-mcp",
+  "keywords": [
+    "obsidian",
+    "mcp",
+    "vault",
+    "notes",
+    "knowledge-base"
+  ]
+}
