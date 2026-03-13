@@ -4,12 +4,20 @@ description: Initialize and verify connection to the Obsidian vault
 
 Verify the Obsidian vault connection and show an overview of the current state.
 
-Use the obsidian MCP `get_vault_stats` tool to retrieve vault statistics.
+Run these Obsidian CLI commands to gather vault info:
 
-After retrieving stats:
-1. Show the vault path (from the server connection)
-2. Show vault statistics: note count, tag count, link count, task stats
-3. Show the standard frontmatter schema used by notes managed through this MCP:
+1. `obsidian version` - verify CLI is working
+2. `obsidian vault` - show vault name and path
+3. `obsidian files total` - total file count
+4. `obsidian tags counts format=json` - all tags with counts
+5. `obsidian tasks total` - total task count
+6. `obsidian tasks done total` - completed tasks
+7. `obsidian tasks todo total` - open tasks
+8. `obsidian unresolved total` - broken links count
+9. `obsidian orphans total` - notes with no incoming links
+10. `obsidian templates` - available templates
+
+After gathering stats, present a summary and show the standard frontmatter schema for managed notes:
 
 ```yaml
 ---
@@ -23,7 +31,8 @@ updated: ISO 8601
 ---
 ```
 
-4. Explain the basic workflow (or suggest running `/obsidian:workflow`)
-5. Suggest creating the first note with `/obsidian:create`
+Then:
+- Explain the basic workflow (or suggest running `/obsidian:workflow`)
+- Suggest creating the first note with `/obsidian:create`
 
 If the vault has already been used (notes exist), inform the user and show the stats summary.
