@@ -1,7 +1,7 @@
 {
   "name": "obsidian",
-  "description": "MCP server for Obsidian vaults - read, write, search, and analyze your notes from Claude Code.",
-  "version": "1.2.0",
+  "description": "MCP server for Obsidian vaults powered by Obsidian CLI. Read, write, search, and manage structured notes from Claude Code.",
+  "version": "2.0.0",
   "author": {
     "name": "Pablo Romero",
     "url": "https://github.com/90PabloRomero"
@@ -14,6 +14,17 @@
     "mcp",
     "vault",
     "notes",
-    "knowledge-base"
-  ]
+    "knowledge-base",
+    "obsidian-cli"
+  ],
+  "mcpServers": {
+    "obsidian": {
+      "command": "bun",
+      "args": [
+        "run",
+        "${CLAUDE_PLUGIN_ROOT}/../../src/index.ts"
+      ],
+      "env": {}
+    }
+  }
 }
