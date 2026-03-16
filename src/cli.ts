@@ -53,7 +53,13 @@ export async function obsidian(
     throw new Error(stderr.trim());
   }
 
-  return stdout.trim();
+  const trimmed = stdout.trim();
+
+  if (trimmed.startsWith("Error:")) {
+    throw new Error(trimmed);
+  }
+
+  return trimmed;
 }
 
 export async function obsidianJson<T>(

@@ -1,6 +1,15 @@
 import { z } from "zod/v4";
+import { mkdir, rm } from "fs/promises";
+import { dirname, join } from "path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { obsidian } from "../cli.ts";
+
+const VAULT_PATH = process.env.OBSIDIAN_VAULT_PATH ?? join(process.env.HOME ?? "", "trabajos/obsidian");
+
+async function ensureParentDir(relativePath: string): Promise<void> {
+  const absoluteDir = dirname(join(VAULT_PATH, relativePath));
+  await mkdir(absoluteDir, { recursive: true });
+}
 
 export function registerWriteTools(server: McpServer): void {
   server.registerTool(
@@ -102,7 +111,8 @@ export function registerWriteTools(server: McpServer): void {
       }),
     },
     async ({ path, permanent }) => {
-      await obsidian("delete", { path, permanent: permanent || undefined });
+      const absolutePath = join(VAULT_PATH, path);
+      await rm(absolutePath, { recursive: true, force: permanent ?? false });
       return {
         content: [
           {
@@ -172,6 +182,7 @@ export function registerWriteTools(server: McpServer): void {
       }),
     },
     async ({ path, to }) => {
+      await ensureParentDir(to);
       await obsidian("move", { path, to });
       return {
         content: [
