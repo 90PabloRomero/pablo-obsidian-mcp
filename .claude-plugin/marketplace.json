@@ -1,0 +1,15 @@
+{
+  "name": "obsidian-mcp-marketplace",
+  "description": "Marketplace for obsidian MCP plugin",
+  "owner": {
+    "name": "Pablo Romero"
+  },
+  "plugins": [
+    {
+      "name": "obsidian",
+      "source": "./",
+      "description": "MCP server for Obsidian vaults powered by Obsidian CLI",
+      "version": "2.0.0"
+    }
+  ]
+}
