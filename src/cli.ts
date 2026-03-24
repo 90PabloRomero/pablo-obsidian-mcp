@@ -1,15 +1,10 @@
-import { execFile } from "child_process";
-import { promisify } from "util";
-
-const exec = promisify(execFile);
-
 interface CliOptions {
   vault?: string;
   format?: "json" | "tsv" | "csv" | "text" | "yaml";
   timeout?: number;
 }
 
-const DEFAULT_TIMEOUT = 10_000;
+const DEFAULT_TIMEOUT = 30_000;
 
 function buildArgs(
   command: string,
@@ -45,11 +40,23 @@ export async function obsidian(
     args.push(`format=${options.format}`);
   }
 
-  const { stdout, stderr } = await exec("obsidian", args, {
-    timeout: options.timeout ?? DEFAULT_TIMEOUT,
+  const timeout = options.timeout ?? DEFAULT_TIMEOUT;
+  const proc = Bun.spawn(["obsidian", ...args], {
+    stdout: "pipe",
+    stderr: "pipe",
   });
 
-  if (stderr && !stdout) {
+  const timer = setTimeout(() => proc.kill(), timeout);
+
+  const [stdout, stderr] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ]);
+
+  clearTimeout(timer);
+
+  const exitCode = proc.exitCode;
+  if (exitCode !== 0 && stderr && !stdout) {
     throw new Error(stderr.trim());
   }
 
